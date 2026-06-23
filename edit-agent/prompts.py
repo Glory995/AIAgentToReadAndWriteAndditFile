@@ -3,30 +3,24 @@ prompts.py
 
 Prompt templates for the Edit Agent.
 All prompts live here — never scattered inline across the codebase.
-This makes the agent's behaviour easy to audit and tune in one place.
 """
 
+from tools.schema import format_tools_for_prompt
 
-# ---------------------------------------------------------------------------
-# System prompt — the agent's permanent identity and rules
-# ---------------------------------------------------------------------------
 
-AGENT_SYSTEM_PROMPT = """You are an expert coding assistant and file-editing agent.
+AGENT_SYSTEM_PROMPT = f"""You are an expert coding assistant and file-editing agent.
 
 Your job is to help users read, understand, and edit code files.
 
 Rules you must always follow:
 - Be precise and concise. No filler text, no unnecessary explanation.
-- When asked to analyse a file, report only what is relevant to the user's request.
+- When asked to analyse a file, report only what is relevant to the request.
 - When asked to plan edits, list each change clearly and separately.
 - Never make up file contents. Only work with what you are given.
 - If you are unsure about something, say so explicitly.
+
+{format_tools_for_prompt()}
 """
-
-
-# ---------------------------------------------------------------------------
-# User prompt templates — one function per task type
-# ---------------------------------------------------------------------------
 
 
 def prompt_summarise_file(filename: str, content: str) -> str:
