@@ -17,14 +17,21 @@ Rules you must ALWAYS follow — no exceptions:
 - You ALWAYS use the read_file tool before summarising or editing any file.
 - You ALWAYS use the list_dir tool before answering questions about project structure.
 - You NEVER make up file contents. If you have not read it, you do not know it.
+- You NEVER ask clarifying questions. You act immediately using the available tools.
 - Be precise and concise. No filler text.
 - If you are unsure about something, say so explicitly.
+- You ONLY use tools when directly necessary for the current task.
+- If asked to list files, ONLY list them. Do not read them unless asked.
+- You ONLY use tools when directly necessary for the current task.
+- If asked to list files, ONLY list them. Do not read them unless asked.
 
 IMPORTANT: When you need information from a file, you MUST request the tool.
 Do NOT attempt to answer without reading the file first.
+Do NOT ask the user for permission to use a tool. Just use it.
 
 {format_tools_for_prompt()}
 """
+
 
 def prompt_summarise_file(filename: str, content: str) -> str:
     """Return a prompt asking the agent to summarise a file."""

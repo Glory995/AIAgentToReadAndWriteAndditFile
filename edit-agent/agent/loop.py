@@ -7,11 +7,15 @@ The model is called repeatedly until it stops requesting tools
 and produces a final plain text response.
 """
 
-from client import complete
-from prompts import AGENT_SYSTEM_PROMPT
+import os
+import requests
+from dotenv import load_dotenv
+
 from tools.parser import extract_tool_request
 from tools.filesystem import read_file, list_dir, write_file
+from prompts import AGENT_SYSTEM_PROMPT
 
+load_dotenv()
 
 # Maps tool names (strings the model sends) to actual Python functions
 TOOL_REGISTRY = {
@@ -38,12 +42,8 @@ def run_tool(tool_request: dict) -> str:
     args = tool_request["args"]
 
     if tool_name not in TOOL_REGISTRY:
-        return f"Error: unknown tool '{tool_name}'. Available tools: {list(TOOL_REGISTRY.keys())}"
+        return f"Error: unknown tool '{tool_name}'. Available: {list(TOOL_REGISTRY.keys())}"
 
-    # Look up the function in TOOL_REGISTRY and call it
-    # **args unpacks the dictionary as keyword arguments
-    # Example: if args = {"path": "client.py"}
-    # then tool_fn(**args) becomes tool_fn(path="client.py")
     tool_fn = TOOL_REGISTRY[tool_name]
 
     try:
@@ -53,41 +53,35 @@ def run_tool(tool_request: dict) -> str:
         return f"Error calling tool '{tool_name}': {e}"
 
 
-def run_agent(user_instruction: str) -> str:
+def run_agent(user_instruction: str, verbose: bool = False) -> str:
     """
     Run the agent loop for a given user instruction.
 
-    Keeps calling the model until it produces a final plain text answer
-    or the iteration limit is reached.
-
     Args:
         user_instruction: The task the user wants the agent to perform.
+        verbose:          If True, print debug info each iteration.
+                          If False, print only a clean progress indicator.
 
     Returns:
         The agent's final plain text response.
     """
-    print(f"\n[agent] Starting task: {user_instruction}")
-
-    # The conversation history — this list grows each iteration
-    # so the model always knows what has already happened
+    # The conversation history — grows each iteration so the model
+    # always knows what has already happened in this session
     messages = [
         {"role": "system", "content": AGENT_SYSTEM_PROMPT},
         {"role": "user", "content": user_instruction},
     ]
 
+    url = f"{os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434')}/api/chat"
+    model = os.getenv("DEFAULT_MODEL", "llama3.2")
+
     for iteration in range(1, MAX_ITERATIONS + 1):
-        print(f"[agent] Iteration {iteration}")
+        if verbose:
+            print(f"[agent] Iteration {iteration}")
 
-        # Build the payload and call the model directly here
-        # (moved from _call_model helper for clarity)
-        import os, requests
-        from dotenv import load_dotenv
-
-        load_dotenv()
-
-        url = f"{os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434')}/api/chat"
+        # Call the model with the full conversation history
         payload = {
-            "model": os.getenv("DEFAULT_MODEL", "llama3.2"),
+            "model": model,
             "stream": False,
             "messages": messages,
         }
@@ -95,24 +89,35 @@ def run_agent(user_instruction: str) -> str:
         response.raise_for_status()
         raw_response = response.json()["message"]["content"]
 
-        print(f"[agent] Model response: {raw_response}")
+        if verbose:
+            print(f"[agent] Model response: {raw_response}")
 
         # Try to find a tool request anywhere in the response
         tool_request = extract_tool_request(raw_response)
 
         if tool_request is None:
-            # No tool request found — this is the final answer
-            print("[agent] Task complete.")
+            # No tool request — this is the final answer
+            if verbose:
+                print("[agent] Task complete.")
             return raw_response
 
-        # Run the tool and get the result
+        # A tool was requested — run it and feed the result back
         tool_name = tool_request["tool"]
-        print(f"[agent] Running tool: {tool_name} with args: {tool_request['args']}")
-        tool_result = run_tool(tool_request)
-        print(f"[agent] Tool result: {tool_result}")
 
-        # Add what happened to the conversation history
-        # so the model remembers it on the next iteration
+        if verbose:
+            print(
+                f"[agent] Running tool: {tool_name} with args: {tool_request['args']}"
+            )
+        else:
+            # Clean single-line progress for normal use
+            print(f"  → using {tool_name}...")
+
+        tool_result = run_tool(tool_request)
+
+        if verbose:
+            print(f"[agent] Tool result: {tool_result}")
+
+        # Append to conversation history so the model remembers
         messages.append({"role": "assistant", "content": raw_response})
         messages.append({"role": "user", "content": f"Tool result:\n{tool_result}"})
 
