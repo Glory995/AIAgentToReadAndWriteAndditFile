@@ -18,6 +18,11 @@ from tools.parser import extract_tool_request
 from tools.filesystem import read_file, list_dir, write_file
 from prompts import AGENT_SYSTEM_PROMPT
 
+from tools.sandbox import ensure_sandbox_exists
+
+# Make sure the sandbox exists before the agent tries to use it
+ensure_sandbox_exists()
+
 load_dotenv()
 
 # Maps tool names to actual Python functions

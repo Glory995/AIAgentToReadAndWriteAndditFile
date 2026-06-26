@@ -4,62 +4,35 @@ tools/filesystem.py
 Filesystem tools available to the agent.
 Each function corresponds to a tool defined in tools/schema.py.
 
-All paths are relative to the project root.
-Path traversal outside the project root is blocked for safety.
+All paths are sandboxed to the workspace/ directory.
+The agent cannot read or write outside this boundary.
 """
 
 import os
-
-
-# The root directory the agent is allowed to work inside.
-# Every path gets resolved and checked against this.
-PROJECT_ROOT = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
-
-
-def _safe_path(path: str) -> str:
-    """
-    Resolve a relative path and verify it stays inside PROJECT_ROOT.
-
-    This blocks path traversal attacks — for example an instruction like
-    read_file("../../etc/passwd") would escape the project folder without this check.
-
-    Args:
-        path: A relative path provided by the model.
-
-    Returns:
-        The resolved absolute path if it is safe.
-
-    Raises:
-        PermissionError: If the path escapes PROJECT_ROOT.
-    """
-    resolved = os.path.abspath(os.path.join(PROJECT_ROOT, path))
-
-    if not resolved.startswith(PROJECT_ROOT):
-        raise PermissionError(
-            f"Access denied: '{path}' resolves outside the project root."
-        )
-
-    return resolved
+from tools.sandbox import safe_sandbox_path, SANDBOX_DIR
 
 
 def read_file(path: str) -> str:
     """
-    Read and return the contents of a file.
+    Read and return the contents of a file inside the sandbox.
 
     Args:
-        path: Relative path to the file.
+        path: Path to the file, relative to workspace/.
 
     Returns:
         The file contents as a string.
 
     Raises:
         FileNotFoundError: If the file does not exist.
-        PermissionError: If the path escapes the project root.
+        PermissionError: If the path escapes the sandbox.
     """
-    safe = _safe_path(path)
+    safe = safe_sandbox_path(path)
 
     if not os.path.isfile(safe):
-        raise FileNotFoundError(f"File not found: '{path}'")
+        raise FileNotFoundError(
+            f"File not found: '{path}'. "
+            f"Remember the agent can only access files inside workspace/."
+        )
 
     with open(safe, "r", encoding="utf-8") as f:
         return f.read()
@@ -67,33 +40,32 @@ def read_file(path: str) -> str:
 
 def list_dir(path: str = ".") -> str:
     """
-    List the files and folders inside a directory.
+    List the files and folders inside a sandbox directory.
 
     Args:
-        path: Relative path to the directory. Defaults to project root.
+        path: Path to list, relative to workspace/. Defaults to workspace/ root.
 
     Returns:
-        A formatted string listing all entries in the directory.
+        A formatted string listing all entries.
 
     Raises:
         FileNotFoundError: If the directory does not exist.
-        PermissionError: If the path escapes the project root.
+        PermissionError: If the path escapes the sandbox.
     """
-    safe = _safe_path(path)
+    safe = safe_sandbox_path(path)
 
     if not os.path.isdir(safe):
-        raise FileNotFoundError(f"Directory not found: '{path}'")
+        raise FileNotFoundError(f"Directory not found: '{path}' inside workspace/.")
 
     entries = os.listdir(safe)
 
     if not entries:
-        return f"Directory '{path}' is empty."
+        return f"workspace/{path} is empty."
 
-    # Separate folders and files, sort each alphabetically
     folders = sorted([e for e in entries if os.path.isdir(os.path.join(safe, e))])
     files = sorted([e for e in entries if os.path.isfile(os.path.join(safe, e))])
 
-    lines = [f"Contents of '{path}':"]
+    lines = [f"Contents of 'workspace/{path}':"]
     for folder in folders:
         lines.append(f"  [dir]  {folder}/")
     for file in files:
@@ -104,33 +76,26 @@ def list_dir(path: str = ".") -> str:
 
 def write_file(path: str, content: str) -> str:
     """
-    Propose a file edit and write it only if the user approves.
-
-    Shows a diff of the proposed changes and waits for explicit
-    approval before writing anything to disk.
+    Propose a file edit inside the sandbox and write only if approved.
 
     Args:
-        path:    Relative path to the file to write.
-        content: The full content the agent wants to write.
+        path:    Path to the file, relative to workspace/.
+        content: The full content to write.
 
     Returns:
-        A message describing what happened (approved or rejected).
+        A message describing what happened.
 
     Raises:
-        PermissionError: If the path escapes the project root.
+        PermissionError: If the path escapes the sandbox.
     """
-    # _safe_path still runs first — safety check always happens
-    # regardless of whether the edit gets approved
-    safe = _safe_path(path)
+    # Safety check runs first — always
+    safe = safe_sandbox_path(path)
 
-    # Import here to avoid circular imports
-    # (approval imports from filesystem, filesystem imports from approval)
     from agent.approval import request_approval_or_skip
 
     approved, message = request_approval_or_skip(path, content)
 
     if approved:
-        # User said yes — now actually write the file
         os.makedirs(os.path.dirname(safe), exist_ok=True)
         with open(safe, "w", encoding="utf-8") as f:
             f.write(content)

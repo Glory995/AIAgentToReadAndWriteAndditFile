@@ -57,34 +57,29 @@ def request_approval(path: str, original: str, proposed: str) -> bool:
         # Anything else — ask again
         print("  Please type 'y' to approve or 'n' to reject.")
 
-
 def request_approval_or_skip(path: str, proposed: str) -> tuple[bool, str]:
     """
     Read the current file content (if it exists), show the diff, and ask for approval.
 
-    This is the version called by the agent loop — it handles the case
-    where the file doesn't exist yet (a brand new file being created).
-
     Args:
-        path:     The file path being written to.
+        path:     The file path being written to (relative to workspace/).
         proposed: The content the agent wants to write.
 
     Returns:
         A tuple of (approved: bool, message: str)
-        The message is fed back to the agent so it knows what happened.
     """
+    from tools.sandbox import safe_sandbox_path
     import os
-    from tools.filesystem import PROJECT_ROOT
 
-    # Build the full path to check if the file already exists
-    full_path = os.path.join(PROJECT_ROOT, path)
+    try:
+        full_path = safe_sandbox_path(path)
+    except PermissionError as e:
+        return False, str(e)
 
     if os.path.isfile(full_path):
-        # File exists — read it and show a diff
         with open(full_path, "r", encoding="utf-8") as f:
             original = f.read()
     else:
-        # Brand new file — original is empty, whole content is "added"
         original = ""
         print(f"\n  [new file] '{path}' does not exist yet and will be created.")
 
