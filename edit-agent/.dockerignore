@@ -1,0 +1,25 @@
+# .dockerignore
+# Files and folders to exclude from the Docker build context.
+# Keeping the build context small = faster builds.
+
+# Python virtual environment — Docker installs its own
+venv/
+
+# Python cache files — not needed in container
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Environment variables — injected at runtime, never baked in
+.env
+
+# Git history — not needed in container
+.git/
+.gitignore
+
+# Workspace files — mounted as a volume at runtime
+workspace/
+
+# Test files — not needed in production container
+test_*.py
