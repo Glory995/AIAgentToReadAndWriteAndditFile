@@ -10,7 +10,7 @@ Usage:
 import os
 import requests
 from dotenv import load_dotenv
-
+from agent.state import AgentState
 from tools.parser import extract_tool_request
 from tools.filesystem import read_file, list_dir, write_file
 from agent.planner import plan_and_format
@@ -130,34 +130,66 @@ def call_model(messages: list, retries: int = MAX_RETRIES) -> str:
 
 def run_agent_turn(history: list) -> str:
     """
-    Run one full agent turn — may involve multiple tool calls —
-    starting from the current conversation history.
+    Run one full agent turn — may involve multiple tool calls.
+
+    Creates a fresh AgentState for this turn and uses it to
+    track every tool call, cache file reads, and record errors.
 
     Args:
         history: The conversation so far. Gets appended to in place.
 
     Returns:
         The agent's final plain text response for this turn.
-
-    Raises:
-        MaxIterationsExceeded: If the loop never reaches a final answer.
     """
+    # Fresh state for every turn — cleared when the turn ends
+    state = AgentState()
+
     for iteration in range(1, MAX_ITERATIONS + 1):
         try:
             raw_response = call_model(history)
         except (ModelConnectionError, ModelTimeoutError) as e:
-            # Don't crash — return a clear message instead
+            state.record_error(str(e))
             return f"[Error] {e}"
 
         tool_request = extract_tool_request(raw_response)
 
         if tool_request is None:
             history.append({"role": "assistant", "content": raw_response})
+
+            # If the agent did meaningful work, show a summary
+            if len(state.tool_calls) > 2:
+                print()
+                print("  [state] Run summary:")
+                for line in state.summary().split("\n"):
+                    print(f"    {line}")
+
             return raw_response
 
         tool_name = tool_request.get("tool", "unknown")
-        print(f"  → using {tool_name}...")
-        tool_result = run_tool(tool_request)
+        args = tool_request.get("args", {})
+
+        # Record the tool call in state
+        state.record_tool_call(tool_name, args)
+
+        # Check if we can serve a cached file read
+        # instead of hitting the filesystem again
+        if tool_name == "read_file":
+            path = args.get("path", "")
+            if state.already_read(path):
+                print(f"  → read_file (cached: {path})")
+                tool_result = state.get_cached_content(path)
+            else:
+                print(f"  → using {tool_name}...")
+                tool_result = run_tool(tool_request)
+                # Cache the content for potential reuse
+                state.record_read(path, tool_result)
+        elif tool_name == "write_file":
+            print(f"  → using {tool_name}...")
+            tool_result = run_tool(tool_request)
+            state.record_write(args.get("path", ""))
+        else:
+            print(f"  → using {tool_name}...")
+            tool_result = run_tool(tool_request)
 
         history.append({"role": "assistant", "content": raw_response})
         history.append({"role": "user", "content": f"Tool result:\n{tool_result}"})
@@ -165,7 +197,6 @@ def run_agent_turn(history: list) -> str:
     raise MaxIterationsExceeded(
         f"Agent could not complete the task in {MAX_ITERATIONS} steps."
     )
-
 
 def main():
     print("=" * 55)
